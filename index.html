@@ -16,7 +16,7 @@
     --fs:16px;   /* 文字の基本サイズ */
     /* ================================================= */
     --bg:#f4f6f8; --card:#fff; --ink:#1f2933; --sub:#52606d; --line:#e4e7eb;
-    --brand:#1565c0; --brand-d:#0d47a1; --ok:#2e7d32; --ok-bg:#e8f5e9;
+    --brand:#1565c0; --brand-d:#0d47a1; --ok:#00a83a; --ok-bg:#c8f5d4;
     --ng:#c62828; --ng-bg:#ffebee;
   }
   *{box-sizing:border-box}
@@ -85,11 +85,11 @@
   .choice{-webkit-tap-highlight-color:transparent}
   .choice .num{font-weight:700;color:var(--ink);min-width:24px;font-size:1rem}
   .choice .ctext{white-space:pre-wrap}
-  .choice.correct{border-color:var(--ok);background:var(--ok-bg)}
+  .choice.correct{border-color:var(--ok);border-width:2.5px;background:var(--ok-bg)}
   .choice.wrong{border-color:var(--ng);background:var(--ng-bg)}
   .choice.disabled{cursor:default;pointer-events:none;opacity:1;color:var(--ink)}
   .verdict{font-weight:700;font-size:1rem;margin:2px 0 4px}
-  .verdict.ok{color:var(--ok)} .verdict.ng{color:var(--ng)}
+  .verdict.ok{color:#00872f} .verdict.ng{color:var(--ng)}
   .vsub{color:var(--sub);font-size:0.82rem;margin-bottom:12px}
   .explain{padding:14px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;margin-bottom:12px}
   .explain h4{margin:0 0 6px;font-size:0.88rem;color:var(--brand-d)}

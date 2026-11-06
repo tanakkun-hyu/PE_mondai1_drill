@@ -1,8 +1,34 @@
 {
   "schema_version": "1.0",
   "exam": "技術士 問題Ⅰドリル",
-  "generated_at": "2026-11-02T17:05:48+09:00",
+  "generated_at": "2026-11-06T15:07:31+09:00",
   "parts": [
+    {
+      "key": "KF_1",
+      "label": "建設 論理の基礎 1",
+      "file": "KF_1.json",
+      "sheet": "建設_論理の基礎_1",
+      "dept": "建設",
+      "dept_order": 1,
+      "type": "論理の基礎",
+      "type_order": 1,
+      "sheet_no": 1,
+      "count": 3,
+      "updated_at": "2026-11-06T15:07:31+09:00"
+    },
+    {
+      "key": "KF_2",
+      "label": "建設 論理の基礎 2",
+      "file": "KF_2.json",
+      "sheet": "建設_論理の基礎_2",
+      "dept": "建設",
+      "dept_order": 1,
+      "type": "論理の基礎",
+      "type_order": 1,
+      "sheet_no": 2,
+      "count": 0,
+      "updated_at": "2026-11-06T15:07:31+09:00"
+    },
     {
       "key": "KA_1",
       "label": "建設 解決策出し 1",
@@ -11,10 +37,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "解決策出し",
-      "type_order": 1,
+      "type_order": 2,
       "sheet_no": 1,
       "count": 30,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KA_2",
@@ -24,10 +50,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "解決策出し",
-      "type_order": 1,
+      "type_order": 2,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KB_1",
@@ -37,10 +63,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "観点と課題",
-      "type_order": 2,
+      "type_order": 3,
       "sheet_no": 1,
       "count": 30,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KB_2",
@@ -50,10 +76,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "観点と課題",
-      "type_order": 2,
+      "type_order": 3,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KC_1",
@@ -63,10 +89,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "観点の構築",
-      "type_order": 3,
+      "type_order": 4,
       "sheet_no": 1,
       "count": 50,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KC_2",
@@ -76,10 +102,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "観点の構築",
-      "type_order": 3,
+      "type_order": 4,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KD_1",
@@ -89,10 +115,10 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "説明文の論理",
-      "type_order": 4,
+      "type_order": 5,
       "sheet_no": 1,
       "count": 25,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "KD_2",
@@ -102,10 +128,36 @@
       "dept": "建設",
       "dept_order": 1,
       "type": "説明文の論理",
-      "type_order": 4,
+      "type_order": 5,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
+    },
+    {
+      "key": "NF_1",
+      "label": "農業 論理の基礎 1",
+      "file": "NF_1.json",
+      "sheet": "農業_論理の基礎_1",
+      "dept": "農業",
+      "dept_order": 2,
+      "type": "論理の基礎",
+      "type_order": 1,
+      "sheet_no": 1,
+      "count": 3,
+      "updated_at": "2026-11-06T15:07:31+09:00"
+    },
+    {
+      "key": "NF_2",
+      "label": "農業 論理の基礎 2",
+      "file": "NF_2.json",
+      "sheet": "農業_論理の基礎_2",
+      "dept": "農業",
+      "dept_order": 2,
+      "type": "論理の基礎",
+      "type_order": 1,
+      "sheet_no": 2,
+      "count": 0,
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NA_1",
@@ -115,10 +167,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "解決策出し",
-      "type_order": 1,
+      "type_order": 2,
       "sheet_no": 1,
       "count": 24,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NA_2",
@@ -128,10 +180,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "解決策出し",
-      "type_order": 1,
+      "type_order": 2,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NB_1",
@@ -141,10 +193,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "観点と課題",
-      "type_order": 2,
+      "type_order": 3,
       "sheet_no": 1,
       "count": 30,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NB_2",
@@ -154,10 +206,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "観点と課題",
-      "type_order": 2,
+      "type_order": 3,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NC_1",
@@ -167,10 +219,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "観点の構築",
-      "type_order": 3,
+      "type_order": 4,
       "sheet_no": 1,
       "count": 50,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "NC_2",
@@ -180,10 +232,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "観点の構築",
-      "type_order": 3,
+      "type_order": 4,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "ND_1",
@@ -193,10 +245,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "説明文の論理",
-      "type_order": 4,
+      "type_order": 5,
       "sheet_no": 1,
       "count": 21,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     },
     {
       "key": "ND_2",
@@ -206,10 +258,10 @@
       "dept": "農業",
       "dept_order": 2,
       "type": "説明文の論理",
-      "type_order": 4,
+      "type_order": 5,
       "sheet_no": 2,
       "count": 0,
-      "updated_at": "2026-11-02T17:05:48+09:00"
+      "updated_at": "2026-11-06T15:07:31+09:00"
     }
   ]
 }
