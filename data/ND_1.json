@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "ND_1",
   "part_label": "農業 説明文の論理 1",
@@ -7,7 +7,7 @@
   "dept": "農業",
   "type": "説明文の論理",
   "sheet_no": 1,
-  "generated_at": "2026-11-06T15:07:31+09:00",
+  "generated_at": "2026-11-11T14:49:12+09:00",
   "questions": [
     {
       "id": "ND001",

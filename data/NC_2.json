@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "NC_2",
   "part_label": "農業 観点の構築 2",
@@ -7,6 +7,6 @@
   "dept": "農業",
   "type": "観点の構築",
   "sheet_no": 2,
-  "generated_at": "2026-11-06T15:07:31+09:00",
+  "generated_at": "2026-11-11T14:49:12+09:00",
   "questions": []
 }
