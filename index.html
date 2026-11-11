@@ -7,6 +7,8 @@
 <!--
   技術士 問題Ⅰドリル（四択）
   RCCM択一 配布版（rccm-takuitsu-web 2026-09-03）の形式を流用して新しく作ったもの。RCCM側のファイルとは別物。
+  v2（2026-11-10）：選択肢の並べ替え（解説の番号も連動）／セット単位の出題順／論点別の集計／
+                    先に自分で考えるモード／間違えた問題の復習／記録のCSV保存／【条件】行の強調
   データ：data/manifest.json と data/*.json（スプレッドシートのGAS「ExportDrill.gs」で書き出す）
 -->
 <style>
@@ -109,6 +111,13 @@
   .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
   .kpi b{display:block;font-size:1.4rem;color:var(--brand-d);font-variant-numeric:tabular-nums}
   .kpi span{font-size:0.75rem;color:var(--sub)}
+  /* v2：条件の強調／先に考えるモード／切り替えボタン */
+  .cond{display:block;margin:6px 0;padding:8px 10px;border-left:4px solid #e65100;background:#fff3e0;border-radius:6px}
+  .think{padding:14px;border:1.5px dashed var(--brand);border-radius:10px;background:#f3f8ff}
+  .toggle{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;font-weight:600;margin-bottom:10px}
+  .toggle .stat{display:block;font-weight:400;color:var(--sub);font-size:0.78rem}
+  .toggle .sw{flex:none;font-weight:700;padding:2px 12px;border-radius:12px;background:#eef2f7;color:var(--sub)}
+  .toggle.on .sw{background:var(--brand);color:#fff}
   input[type=text],input[type=password]{font-size:1rem;padding:10px 12px;border:1px solid var(--line);border-radius:8px;width:100%}
 </style>
 </head>
@@ -174,13 +183,68 @@ var STORE=(function(){
   var unlocked = false;
 
   var S = { screen:"boot", dept:null, partKey:null, catName:null,
-            qIndex:0, view:"question", answers:{}, times:{}, timer:null, results:{} };
+            qIndex:0, view:"question", answers:{}, times:{}, timer:null, results:{},
+            mode:"cat", qs:[], perms:{}, revealed:{}, reviewRes:null };
+  var QMAP = {};          // 問題ID → 問題
+  var REVIEW_MAX = 20;    // 復習1回あたりの問題数の上限
 
   var app = document.getElementById("app");
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
   /* 本文：エスケープ＋【見出し】を太字に（改行は CSS の pre-wrap でそのまま表示） */
-  function rich(s){ return esc(s).replace(/【([^】\n]{1,40})】/g,'<strong>【$1】</strong>'); }
+  function rich(s){
+    return esc(s)
+      .replace(/(^|\n)(【条件】[^\n]*)(\n|$)/g,'<span class="cond">$2</span>')   // 条件の行を強調
+      .replace(/【([^】\n]{1,40})】/g,'<strong>【$1】</strong>');
+  }
+
+  /* ---------- v2：並べ替え・論点 ---------- */
+  function shuffle(a){ a=a.slice(); for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+  function isOn(v){ var t=String(v==null?"":v).trim(); return t!=="" && t!=="0" && t!=="false"; }
+  /* 選択肢の並び：perm[表示位置-1]＝元の選択肢番号。「並び固定」の問題は入れ替えない */
+  function makePerm(q){ return isOn(q.fixed) ? [1,2,3,4] : shuffle([1,2,3,4]); }
+  function dispOf(perm,orig){ return perm.indexOf(orig)+1; }
+  function zen(c){ var i="１２３４".indexOf(c); return i>=0 ? i+1 : parseInt(c,10); }
+  /* 解説の「選択肢N」を、画面に出した番号に書き換える。続けて並ぶ「選択肢N：」の行は番号順に並べ直す */
+  function mapExp(text,perm){
+    var t=String(text==null?"":text).replace(/選択肢\s*([1-4１-４])/g,function(m,c){ return "選択肢"+dispOf(perm,zen(c)); });
+    var out=[], run=[];
+    function flush(){ run.sort(function(a,b){ return a.n-b.n; }); run.forEach(function(r){ out.push(r.s); }); run=[]; }
+    t.split("\n").forEach(function(line){
+      var m=line.match(/^選択肢([1-4])[：:]/);
+      if(m) run.push({ n:+m[1], s:line }); else { flush(); out.push(line); }
+    });
+    flush();
+    return out.join("\n");
+  }
+  /* 出題順：同じセット（連問）は順番を守ってひとかたまり。かたまり同士の順番を入れ替える */
+  function blockKey(q){
+    if(q.set) return "set:"+q.set;
+    var p=partByKey(q._pk);
+    if(p && p.type==="観点の構築") return "src:"+q.source;
+    return null;
+  }
+  function orderQuestions(qs){
+    var blocks=[], last=null;
+    qs.forEach(function(q){
+      var k=blockKey(q);
+      if(k!==null && last && last.k===k) last.qs.push(q);
+      else { last={ k:k, qs:[q] }; blocks.push(last); }
+    });
+    var out=[]; shuffle(blocks).forEach(function(b){ out=out.concat(b.qs); });
+    return out;
+  }
+  /* 論点：「論点」列があればそれ。無ければ解説の「理由：〜」から拾う */
+  function pointOf(q){
+    if(q.point && String(q.point).trim()) return String(q.point).trim();
+    var m=String(q.explanation||"").match(/理由：([^\n]+)/); if(!m) return "";
+    var t=m[1].split("（")[0].split("・")[0].trim();
+    if(t.indexOf("課題返し")===0) t="課題返し";
+    return t;
+  }
+  /* 先に自分で考えるモード */
+  function thinkOn(){ return !!STORE.get("think",false); }
+  function thinkApplies(q){ return !/適さない|適切でない|誤っている|誤りは/.test(q.question||""); }
   function pad(n){ return (n<10?"0":"")+n; }
   function ymd(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
   function md(s){ var p=String(s||"").split("-"); return p.length===3? (+p[1])+"/"+(+p[2]) : ""; }
@@ -194,7 +258,11 @@ var STORE=(function(){
         if(!parts.length) throw 0;
         return Promise.all(parts.map(function(p){
           return fetch(base+"data/"+p.file,{cache:"no-cache"}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
-            .then(function(d){ return Object.assign({}, p, { questions:(d.questions||[]) }); });
+            .then(function(d){
+              var qs=(d.questions||[]);
+              qs.forEach(function(q){ q._pk=p.key; QMAP[q.id]=q; });
+              return Object.assign({}, p, { questions:qs });
+            });
         })).then(function(list){
           DATA.exam=m.exam||DATA.exam;
           DATA.parts=list.sort(function(a,b){
@@ -223,7 +291,7 @@ var STORE=(function(){
   function logAll(){ return STORE.get("log",[]); }
   function logAnswer(q, picked, sec){
     var a=logAll();
-    a.push({ id:q.id, k:S.partKey, c:S.catName, t:stamp(new Date()), s:sec, a:picked, o:(picked===q.answer?1:0) });
+    a.push({ id:q.id, k:q._pk, c:q.category, t:stamp(new Date()), s:sec, a:picked, o:(picked===q.answer?1:0) });
     if(a.length>20000) a=a.slice(a.length-20000);
     STORE.set("log",a);
   }
@@ -250,14 +318,32 @@ var STORE=(function(){
 
   function openDept(d){ S.dept=d; go("types"); }
   function openPart(k){ S.partKey=k; S.results={}; go("cats"); }
-  function startCategory(cat){ S.catName=cat; S.qIndex=0; S.view="question"; S.answers={}; S.times={}; S.timer=null; go("quiz"); }
+  function beginQuiz(){ S.qIndex=0; S.view="question"; S.answers={}; S.times={}; S.timer=null; S.perms={}; S.revealed={}; go("quiz"); }
+  function startCategory(cat){ S.mode="cat"; S.catName=cat; S.qs=orderQuestions(questionsOf(S.partKey,cat)); beginQuiz(); }
+  /* 復習：部門の中で、最新の解答が不正解の問題 */
+  function wrongIn(dept){
+    var last={}; logAll().forEach(function(e){ last[e.id]=e.o; });
+    var out=[];
+    partsInDept(dept).forEach(function(p){ (p.questions||[]).forEach(function(q){ if(last[q.id]===0) out.push(q); }); });
+    return out;
+  }
+  function startReview(){
+    var w=shuffle(wrongIn(S.dept)).slice(0,REVIEW_MAX); if(!w.length) return;
+    S.mode="review"; S.catName="復習"; S.qs=w; beginQuiz();
+  }
+  function quizHome(){ go(S.mode==="review" ? "types" : "cats"); }
 
-  function curQuiz(){ var qs=questionsOf(S.partKey,S.catName); return { qs:qs, q:qs[S.qIndex], picked:S.answers[S.qIndex] }; }
+  /* S.answers には「元の選択肢番号」を入れる（画面の番号は perm で変換） */
+  function curQuiz(){
+    var qs=S.qs, q=qs[S.qIndex];
+    if(q && !S.perms[S.qIndex]) S.perms[S.qIndex]=makePerm(q);
+    return { qs:qs, q:q, picked:S.answers[S.qIndex], perm:S.perms[S.qIndex] };
+  }
   /* 1ステップ移動：戻る＝一つ前の画面 / 次へ＝一つ先の画面（配布版と同じ動き） */
   function stepBack(){
     if(S.view==="explain"){ S.view="question"; }
     else if(S.qIndex>0){ S.qIndex--; S.view="explain"; }
-    else { go("cats"); return; }
+    else { quizHome(); return; }
     show();
   }
   function stepNext(){
@@ -295,6 +381,7 @@ var STORE=(function(){
     if(S.screen==="cats") return renderCats();
     if(S.screen==="quiz") return renderQuiz();
     if(S.screen==="catresult") return renderCatResult();
+    if(S.screen==="reviewresult") return renderReviewResult();
     if(S.screen==="overall") return renderOverall();
     if(S.screen==="records") return renderRecords();
   }
@@ -321,8 +408,13 @@ var STORE=(function(){
       h+='<button class="menu-btn" data-dept="'+esc(d)+'"><span>'+esc(d)+'</span><span class="sub">'+n+'問 ›</span></button>';
     });
     h+='</div></div>';
+    var on=thinkOn();
+    h+='<button class="toggle'+(on?' on':'')+'" id="thinkTg"><span>先に自分で考えるモード'+
+       '<span class="stat">選択肢を隠して出題します。自分の答えを決めてから選択肢を見ます。</span></span>'+
+       '<span class="sw">'+(on?'ON':'OFF')+'</span></button>';
     h+='<button class="ghost" id="toRec" style="width:100%">学習記録を見る</button>';
     app.innerHTML=h;
+    document.getElementById("thinkTg").onclick=function(){ STORE.set("think",!thinkOn()); render(); };
     wireAll("[data-dept]","data-dept",openDept);
     document.getElementById("toRec").onclick=function(){ go("records"); };
   }
@@ -346,7 +438,10 @@ var STORE=(function(){
          '<span class="stat">'+esc(stat)+'</span></span><span class="sub">'+n+'問 ›</span></button>';
     });
     h+='</div></div>';
+    var wn=wrongIn(S.dept).length;
+    if(wn) h+='<button class="ghost" id="revBtn" style="width:100%">間違えた問題を復習する（'+wn+'問'+(wn>REVIEW_MAX?'のうち'+REVIEW_MAX+'問':'')+'）</button>';
     app.innerHTML=h; wireBack(function(){ go("menu"); });
+    if(wn) document.getElementById("revBtn").onclick=startReview;
     wireAll("[data-k]","data-k",openPart);
   }
 
@@ -387,11 +482,13 @@ var STORE=(function(){
 
   /* ④ 問題・解説 */
   function renderQuiz(){
-    var c=curQuiz(), qs=c.qs, q=c.q, picked=c.picked;
-    var p=partByKey(S.partKey);
+    var c=curQuiz(), qs=c.qs, q=c.q, picked=c.picked, perm=c.perm;
+    var p=partByKey(q._pk);
     var last=(S.qIndex>=qs.length-1);
-    var crumb=p.dept+" › "+partName(p)+" › "+S.catName;
-    var h=bar(function(){ go("cats"); },"カテゴリー一覧",crumb);
+    var isRev=(S.mode==="review");
+    var crumb=isRev ? p.dept+" › 復習 › "+partName(p)+"・"+q.category : p.dept+" › "+partName(p)+" › "+S.catName;
+    var homeLabel=isRev ? "種別選択" : "カテゴリー一覧";
+    var h=bar(quizHome,homeLabel,crumb);
 
     // 青帯のボタン
     document.getElementById("hPos").textContent = (S.qIndex+1)+" / "+qs.length+(S.view==="explain"&&picked!==undefined?"　解説":"　問題");
@@ -406,14 +503,15 @@ var STORE=(function(){
     // 解説ビュー（解答済み）
     if(isExp){
       var ok=picked===q.answer;
-      h+='<div class="card">'+tags;
-      h+='<div class="verdict '+(ok?"ok":"ng")+'">'+(ok?"正解":"不正解")+'（あなた: '+picked+' ／ 正答: '+q.answer+'）</div>';
+      var pt=pointOf(q);
+      h+='<div class="card">'+tags.replace(/<\/div>$/, (pt?'<span class="tag">論点：'+esc(pt)+'</span>':'')+'</div>');
+      h+='<div class="verdict '+(ok?"ok":"ng")+'">'+(ok?"正解":"不正解")+'（あなた: '+dispOf(perm,picked)+' ／ 正答: '+dispOf(perm,q.answer)+'）</div>';
       h+='<div class="vsub">解答時間 '+(S.times[S.qIndex]!=null? S.times[S.qIndex]+'秒' : '—')+'</div>';
-      h+='<div class="explain"><h4>解説</h4><div class="exp-body">'+rich(q.explanation)+'</div></div>';
+      h+='<div class="explain"><h4>解説</h4><div class="exp-body">'+rich(mapExp(q.explanation,perm))+'</div></div>';
       h+='<div class="nav">'+backBtn+'<span class="spacer"></span>'+
-         '<button class="primary" id="stepNext">'+(last?"カテゴリーの結果へ":"次へ ›")+'</button></div>';
+         '<button class="primary" id="stepNext">'+(last?(isRev?"復習の結果へ":"カテゴリーの結果へ"):"次へ ›")+'</button></div>';
       h+='</div>';
-      app.innerHTML=h; wireBack(function(){ go("cats"); });
+      app.innerHTML=h; wireBack(quizHome);
       document.getElementById("stepBack").onclick=stepBack;
       document.getElementById("stepNext").onclick=stepNext;
       return;
@@ -423,19 +521,28 @@ var STORE=(function(){
     if(picked===undefined && !(S.timer && S.timer.idx===S.qIndex)) S.timer={ idx:S.qIndex, t:Date.now() };
     h+='<div class="card">'+tags;
     h+='<p class="qtext">'+rich(q.question)+'</p>';
-    h+='<div class="choices">';
-    [1,2,3,4].forEach(function(n){
-      var cls="choice"; var answered=(picked!==undefined);
-      if(answered){ cls+=" disabled"; if(n===q.answer) cls+=" correct"; else if(n===picked) cls+=" wrong"; }
-      h+='<button class="'+cls+'" data-n="'+n+'"><span class="num">'+n+'.</span><span class="ctext">'+esc(q["choice_"+n]||"")+'</span></button>';
-    });
-    h+='</div>';
+    var hide=(picked===undefined && thinkOn() && thinkApplies(q) && !S.revealed[S.qIndex]);
+    if(hide){
+      h+='<div class="think"><div class="note" style="margin-bottom:10px">選択肢を見る前に、自分の答えを決めてください（頭の中か、紙に書く）。</div>'+
+         '<button class="primary" id="reveal" style="width:100%">答えを決めた → 選択肢を見る</button></div>';
+    } else {
+      h+='<div class="choices">';
+      [1,2,3,4].forEach(function(n){
+        var o=perm[n-1];   // 画面の n 番目に出す、元の選択肢番号
+        var cls="choice"; var answered=(picked!==undefined);
+        if(answered){ cls+=" disabled"; if(o===q.answer) cls+=" correct"; else if(o===picked) cls+=" wrong"; }
+        h+='<button class="'+cls+'" data-n="'+o+'"><span class="num">'+n+'.</span><span class="ctext">'+esc(q["choice_"+o]||"")+'</span></button>';
+      });
+      h+='</div>';
+    }
     h+='<div class="nav" style="margin-top:14px">'+backBtn+'<span class="spacer"></span>';
     if(picked!==undefined){ h+='<button class="primary" id="stepNext">解説へ ›</button>'; }
     h+='</div></div>';
-    app.innerHTML=h; wireBack(function(){ go("cats"); });
+    app.innerHTML=h; wireBack(quizHome);
     document.getElementById("stepBack").onclick=stepBack;
-    if(picked===undefined){
+    if(hide){
+      document.getElementById("reveal").onclick=function(){ S.revealed[S.qIndex]=1; render(); };
+    } else if(picked===undefined){
       wireAll(".choice","data-n",function(v){ pick(parseInt(v,10)); });
     } else {
       document.getElementById("stepNext").onclick=stepNext;
@@ -446,6 +553,7 @@ var STORE=(function(){
     var correct=0, tsum=0, tn=0;
     qs.forEach(function(q,i){ if(S.answers[i]===q.answer) correct++; if(S.times[i]!=null){ tsum+=S.times[i]; tn++; } });
     var pct=Math.round(correct/qs.length*100);
+    if(S.mode==="review"){ S.reviewRes={ correct:correct, total:qs.length }; go("reviewresult"); return; }
     S.results[S.catName]={ correct:correct, total:qs.length, avg:(tn?Math.round(tsum/tn):null) };
     histPush(S.partKey, S.catName, { p:pct, d:ymd(new Date()) });
     go("catresult");
@@ -473,6 +581,21 @@ var STORE=(function(){
     if(nextCat) document.getElementById("nextCat").onclick=function(){ startCategory(nextCat.name); };
     if(allDone) document.getElementById("toOverall").onclick=function(){ go("overall"); };
     document.getElementById("toCats").onclick=function(){ go("cats"); };
+  }
+
+  /* ⑤' 復習の結果 */
+  function renderReviewResult(){
+    var res=S.reviewRes, rest=wrongIn(S.dept).length;
+    var h=bar(function(){ go("types"); },"種別選択","復習の結果");
+    h+='<div class="card center">';
+    h+='<div class="note">復習の正答率</div><div class="pct">'+Math.round(res.correct/res.total*100)+'%</div>';
+    h+='<div class="note">'+res.correct+' / '+res.total+' 問正解　／　まだ間違えたままの問題：'+rest+'問</div>';
+    h+='<div class="nav" style="margin-top:16px;justify-content:center">';
+    if(rest) h+='<button class="primary" id="again">続けて復習する ›</button>';
+    h+='<button class="ghost" id="toTypes">種別選択へ</button></div></div>';
+    app.innerHTML=h; wireBack(function(){ go("types"); });
+    if(rest) document.getElementById("again").onclick=startReview;
+    document.getElementById("toTypes").onclick=function(){ go("types"); };
   }
 
   /* ⑥ シート（セクション）の総合結果 */
@@ -528,7 +651,43 @@ var STORE=(function(){
       h+='</table><div class="note" style="margin-top:8px">記録はこの端末だけに保存されます（直近30日分を表示）。</div>';
     }
     h+='</div>';
+
+    // 論点別（各問題の最新の解答で集計。正答率の低い順＝弱点が上）
+    var lastE={}; logs.forEach(function(e){ lastE[e.id]=e; });
+    var pt={};
+    Object.keys(lastE).forEach(function(id){
+      var q=QMAP[id]; if(!q) return;
+      var name=pointOf(q); if(!name) return;
+      pt[name]=pt[name]||{ n:0, ok:0 }; pt[name].n++; pt[name].ok+=lastE[id].o;
+    });
+    var prow=Object.keys(pt).map(function(k){ return { k:k, n:pt[k].n, pct:Math.round(pt[k].ok/pt[k].n*100) }; })
+      .sort(function(a,b){ return (a.pct-b.pct)||(b.n-a.n); });
+    if(prow.length){
+      h+='<div class="card"><div class="grp" style="margin:0 0 8px">論点別の正答率（低い順）</div>';
+      h+='<table><tr><th>論点</th><th class="num-c">解答済</th><th class="num-c">正答率</th></tr>';
+      prow.forEach(function(r){
+        h+='<tr><td>'+esc(r.k)+'</td><td class="num-c">'+r.n+'問</td><td class="num-c" style="color:'+accColor(r.pct)+'">'+r.pct+'%</td></tr>';
+      });
+      h+='</table><div class="note" style="margin-top:8px">各問題の最新の解答で集計しています。</div></div>';
+    }
+    if(logs.length) h+='<button class="ghost" id="csvBtn" style="width:100%">記録をCSVで保存する（指導者に送る用）</button>';
     app.innerHTML=h; wireBack(function(){ go("menu"); });
+    if(logs.length) document.getElementById("csvBtn").onclick=exportCsv;
+  }
+  function exportCsv(){
+    var rows=[["日時","ID","シート","カテゴリー","論点","選んだ選択肢（元の番号）","正誤","解答秒"]];
+    logAll().forEach(function(e){
+      var q=QMAP[e.id];
+      rows.push([e.t, e.id, e.k||"", e.c||"", q?pointOf(q):"", e.a, e.o?"○":"×", e.s]);
+    });
+    var csv=rows.map(function(r){
+      return r.map(function(v){ return '"'+String(v==null?"":v).replace(/"/g,'""')+'"'; }).join(",");
+    }).join("\r\n");
+    var blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+    var a=document.createElement("a");
+    a.href=URL.createObjectURL(blob); a.download="drill_record_"+ymd(new Date())+".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },1000);
   }
 
   /* ---------- ライセンス ---------- */
