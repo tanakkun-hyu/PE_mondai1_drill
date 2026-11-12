@@ -9,6 +9,8 @@
 <!--
   技術士 問題Ⅰドリル（四択）
   RCCM択一 配布版（rccm-takuitsu-web 2026-09-03）の形式を流用して新しく作ったもの。RCCM側のファイルとは別物。
+  v4（2026-11-11）：段階（6段階）／診断／今日のメニュー（弱い論点・間違えた問題・新しい問題を自動で混ぜる）／
+                    段階の合格判定（別の日に2回、80%以上）／仮通過／タブのアイコン
   v2（2026-11-10）：選択肢の並べ替え（解説の番号も連動）／セット単位の出題順／論点別の集計／
                     先に自分で考えるモード／間違えた問題の復習／記録のCSV保存／【条件】行の強調
   データ：data/manifest.json と data/*.json（スプレッドシートのGAS「ExportDrill.gs」で書き出す）
@@ -190,6 +192,33 @@ var STORE=(function(){
   var QMAP = {};          // 問題ID → 問題
   var REVIEW_MAX = 20;    // 復習1回あたりの問題数の上限
 
+  /* ===================== 段階の設定（v4） =====================
+     段階は、種別の名前で決まる。問題ごとに変えたいときだけ、スプレッドシートの「段階」列に 1〜6 を入れる。
+     問題が0問の段階は「準備中」として飛ばす。 */
+  var STAGES = [
+    { no:1, name:"論理の基礎",     types:["論理の基礎"],               goal:"問題・課題・解決策を見分ける" },
+    { no:2, name:"観点と課題",     types:["観点と課題"],               goal:"3つの課題を、重ならないように立てる" },
+    { no:3, name:"解決策と説明文", types:["解決策出し","説明文の論理"], goal:"最も重要な課題に、解決策を出して説明する" },
+    { no:4, name:"リスクと対策",   types:["リスクと対策"],             goal:"解決策から生じるリスクと、その対策を書く" },
+    { no:5, name:"観点の構築",     types:["観点の構築"],               goal:"1題を通して、骨子を組む" },
+    { no:6, name:"条件の読み替え", types:["条件の読み替え"],           goal:"条件が変わっても、組み直す" }
+  ];
+  var KNOW_TYPES = ["知識"];   // 段階に入れず、並行して出す種別
+  var CFG = {
+    PASS_PCT: 80,          // 合格の正答率（％）
+    PASS_DAYS: 2,          // 合格日が何日そろえば、その段階を通過とするか（別の日）
+    MIN_N: 8,              // 1日に何問以上解けば、その日を判定の対象にするか（段階の問題数が少なければ、その数）
+    MENU_N: 15,            // 今日のメニューの問題数（連問を含むと、少し増えることがある）
+    MIX_WEAK: 0.5,         // 弱い論点の割合
+    MIX_RETRY: 0.3,        // 前に間違えた問題の割合（残りは、今の段階の新しい問題）
+    KNOW_FROM: 2,          // 知識の問題を混ぜ始める段階
+    DIAG_PER: 4,           // 診断で、1つの段階から出す問題数
+    DIAG_PASS: 3,          // 診断で、何問正解ならその段階を通過とみなすか
+    ESCAPE_AFTER_DAYS: 3   // 何日挑戦して届かなければ「仮通過」のボタンを出すか（0＝いつでも出す）
+  };
+  var MARU = ["","①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
+  /* ============================================================ */
+
   var app = document.getElementById("app");
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
@@ -247,6 +276,117 @@ var STORE=(function(){
   /* 先に自分で考えるモード */
   function thinkOn(){ return !!STORE.get("think",false); }
   function thinkApplies(q){ return !/適さない|適切でない|誤っている|誤りは/.test(q.question||""); }
+
+  /* ---------- v4：段階・診断・今日のメニュー ---------- */
+  function stageOf(q){
+    var v=parseInt(q.stage,10); if(v>=1 && v<=STAGES.length) return v;
+    var p=partByKey(q._pk); if(!p) return 0;
+    for(var i=0;i<STAGES.length;i++){ if(STAGES[i].types.indexOf(p.type)>=0) return STAGES[i].no; }
+    return 0;
+  }
+  function isKnow(q){ var p=partByKey(q._pk); return !!p && KNOW_TYPES.indexOf(p.type)>=0; }
+  function deptQs(dept){ var out=[]; partsInDept(dept).forEach(function(p){ out=out.concat(p.questions||[]); }); return out; }
+  function progGet(dept){ var a=STORE.get("prog",{}); return a[dept]||{ start:0, skip:{} }; }
+  function progSet(dept,o){ var a=STORE.get("prog",{}); a[dept]=o; STORE.set("prog",a); }
+  /* 段階ごと・日ごとの成績。同じ日に同じ問題を何度解いても、最初の1回だけ数える（解き直しで上げられないように） */
+  function stageDays(dept){
+    var res={}, seen={};
+    logAll().forEach(function(e){
+      if(e.m==="diag") return;                       // 診断の解答は、合格判定に数えない
+      var q=QMAP[e.id]; if(!q) return;
+      var p=partByKey(q._pk); if(!p || p.dept!==dept) return;
+      var st=stageOf(q); if(!st) return;
+      var d=String(e.t).slice(0,10), key=d+"|"+e.id; if(seen[key]) return; seen[key]=1;
+      res[st]=res[st]||{}; var r=res[st][d]=res[st][d]||{ n:0, ok:0 }; r.n++; r.ok+=e.o;
+    });
+    return res;
+  }
+  /* 各段階の状態：empty＝準備中／pass＝通過／diag＝診断で通過／skip＝仮通過／now＝挑戦中／todo＝これから */
+  function stageInfo(dept){
+    var pr=progGet(dept), days=stageDays(dept), today=ymd(new Date()), all=deptQs(dept), cur=null;
+    var list=STAGES.map(function(sg){
+      var total=all.filter(function(q){ return stageOf(q)===sg.no; }).length;
+      var need=Math.min(CFG.MIN_N,total), dd=days[sg.no]||{}, passDays=0, tryDays=0;
+      Object.keys(dd).forEach(function(d){
+        if(dd[d].n>=need && need>0){ tryDays++; if(dd[d].ok/dd[d].n*100>=CFG.PASS_PCT) passDays++; }
+      });
+      var st = !total ? "empty" : passDays>=CFG.PASS_DAYS ? "pass" : (pr.start>sg.no ? "diag" : (pr.skip&&pr.skip[sg.no] ? "skip" : "todo"));
+      return { no:sg.no, name:sg.name, goal:sg.goal, total:total, need:need, passDays:passDays, tryDays:tryDays,
+               today:dd[today]||{ n:0, ok:0 }, status:st };
+    });
+    for(var i=0;i<list.length;i++){ if(list[i].status==="todo"){ list[i].status="now"; cur=list[i]; break; } }
+    return { list:list, cur:cur, started:pr.start>0 };
+  }
+  /* 今の段階までの問題（知識は KNOW_FROM の段階から） */
+  function allowedQs(dept, curNo){
+    return deptQs(dept).filter(function(q){
+      var st=stageOf(q); if(st) return st<=curNo;
+      return isKnow(q) && curNo>=CFG.KNOW_FROM;
+    });
+  }
+  function blockOf(q){
+    var k=blockKey(q); if(k===null) return [q];
+    return (partByKey(q._pk).questions||[]).filter(function(x){ return blockKey(x)===k; });
+  }
+  /* 今日のメニュー：弱い論点／前に間違えた問題／今の段階の新しい問題 を混ぜる */
+  function buildMenu(dept){
+    var info=stageInfo(dept), curNo=info.cur ? info.cur.no : STAGES.length;
+    var qs=allowedQs(dept,curNo); if(!qs.length) return [];
+    var last={}, lastT={};
+    logAll().forEach(function(e){ last[e.id]=e.o; lastT[e.id]=e.t; });
+    function byOld(a,b){ var x=lastT[a.id]||"", y=lastT[b.id]||""; return x<y?-1:(x>y?1:0); }   // 解いていない／古い順
+    var pt={};
+    qs.forEach(function(q){ if(last[q.id]===undefined) return; var k=pointOf(q); if(!k) return;
+      pt[k]=pt[k]||{ n:0, ok:0 }; pt[k].n++; pt[k].ok+=last[q.id]; });
+    var weak=Object.keys(pt).filter(function(k){ return pt[k].n>=3 && pt[k].ok/pt[k].n*100<CFG.PASS_PCT; })
+      .sort(function(a,b){ return pt[a].ok/pt[a].n-pt[b].ok/pt[b].n; }).slice(0,3);
+    var retry=shuffle(qs.filter(function(q){ return last[q.id]===0; })).sort(byOld);
+    var weakQ=shuffle(qs.filter(function(q){ return last[q.id]!==0 && weak.indexOf(pointOf(q))>=0; })).sort(byOld);
+    var fresh=shuffle(qs.filter(function(q){ return last[q.id]===undefined && (stageOf(q)===curNo || !stageOf(q)); }));
+    var rest=shuffle(qs.filter(function(q){ return stageOf(q)===curNo; })).sort(byOld).concat(shuffle(qs).sort(byOld));
+
+    var units=[], used={}, count=0;
+    function take(list,n){
+      var got=0;
+      for(var i=0;i<list.length && got<n && count<CFG.MENU_N;i++){
+        var q=list[i]; if(used[q.id]) continue;
+        // 初めて解く連問は、順番どおりにまとめて出す。解いたことのある問題は、1問ずつ出す
+        var blk=(last[q.id]===undefined ? blockOf(q) : [q]).filter(function(x){ return !used[x.id]; });
+        blk.forEach(function(x){ used[x.id]=1; });
+        units.push(blk); got+=blk.length; count+=blk.length;
+      }
+    }
+    var nW=Math.round(CFG.MENU_N*CFG.MIX_WEAK), nR=Math.round(CFG.MENU_N*CFG.MIX_RETRY);
+    take(retry,nR); take(weakQ,nW); take(fresh,CFG.MENU_N); take(rest,CFG.MENU_N);
+    var out=[]; shuffle(units).forEach(function(u){ out=out.concat(u); });
+    return out;
+  }
+  function startMenu(){
+    var qs=buildMenu(S.dept); if(!qs.length) return;
+    S.mode="menu"; S.catName="今日のメニュー"; S.qs=qs; S.before=stageInfo(S.dept); beginQuiz();
+  }
+  /* 診断：各段階から少しずつ出し、最初に届かなかった段階から始める */
+  function startDiag(){
+    var all=deptQs(S.dept), qs=[];
+    STAGES.forEach(function(sg){
+      qs=qs.concat(shuffle(all.filter(function(q){ return stageOf(q)===sg.no; })).slice(0,CFG.DIAG_PER));
+    });
+    if(!qs.length) return;
+    S.mode="diag"; S.catName="診断"; S.qs=qs; beginQuiz();
+  }
+  function finishDiag(qs){
+    var r={};
+    qs.forEach(function(q,i){ var st=stageOf(q); r[st]=r[st]||{ n:0, ok:0 }; r[st].n++; if(S.answers[i]===q.answer) r[st].ok++; });
+    var start=STAGES.length+1;
+    for(var i=0;i<STAGES.length;i++){
+      var x=r[STAGES[i].no]; if(!x) continue;
+      if(x.ok < Math.min(CFG.DIAG_PASS, Math.ceil(x.n*CFG.DIAG_PASS/CFG.DIAG_PER))){ start=STAGES[i].no; break; }
+    }
+    var pr=progGet(S.dept); pr.start=start; pr.diag={ d:ymd(new Date()), r:r }; pr.skip={};
+    progSet(S.dept,pr); S.diagRes={ r:r, start:start };
+    go("diagresult");
+  }
+  var MODE_LABEL={ cat:"カテゴリー", review:"復習", menu:"今日のメニュー", diag:"診断" };
   function pad(n){ return (n<10?"0":"")+n; }
   function ymd(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
   function md(s){ var p=String(s||"").split("-"); return p.length===3? (+p[1])+"/"+(+p[2]) : ""; }
@@ -293,7 +433,7 @@ var STORE=(function(){
   function logAll(){ return STORE.get("log",[]); }
   function logAnswer(q, picked, sec){
     var a=logAll();
-    a.push({ id:q.id, k:q._pk, c:q.category, t:stamp(new Date()), s:sec, a:picked, o:(picked===q.answer?1:0) });
+    a.push({ id:q.id, k:q._pk, c:q.category, t:stamp(new Date()), s:sec, a:picked, o:(picked===q.answer?1:0), m:S.mode });
     if(a.length>20000) a=a.slice(a.length-20000);
     STORE.set("log",a);
   }
@@ -333,7 +473,7 @@ var STORE=(function(){
     var w=shuffle(wrongIn(S.dept)).slice(0,REVIEW_MAX); if(!w.length) return;
     S.mode="review"; S.catName="復習"; S.qs=w; beginQuiz();
   }
-  function quizHome(){ go(S.mode==="review" ? "types" : "cats"); }
+  function quizHome(){ go(S.mode==="cat" ? "cats" : "types"); }
 
   /* S.answers には「元の選択肢番号」を入れる（画面の番号は perm で変換） */
   function curQuiz(){
@@ -384,6 +524,8 @@ var STORE=(function(){
     if(S.screen==="quiz") return renderQuiz();
     if(S.screen==="catresult") return renderCatResult();
     if(S.screen==="reviewresult") return renderReviewResult();
+    if(S.screen==="menuresult") return renderMenuResult();
+    if(S.screen==="diagresult") return renderDiagResult();
     if(S.screen==="overall") return renderOverall();
     if(S.screen==="records") return renderRecords();
   }
@@ -423,9 +565,50 @@ var STORE=(function(){
 
   /* ② 種別（シートごと。_2 は 0問でも表示） */
   function renderTypes(){
-    var ps=partsInDept(S.dept);
+    function typeStage(t){ for(var i=0;i<STAGES.length;i++){ if(STAGES[i].types.indexOf(t)>=0) return STAGES[i].no; } return 99; }
+    var ps=partsInDept(S.dept).slice().sort(function(a,b){
+      return (typeStage(a.type)-typeStage(b.type))||(a.type_order-b.type_order)||(a.sheet_no-b.sheet_no); });
     var h=bar(function(){ go("menu"); },"メニュー",S.dept+" › 種別選択");
-    h+='<div class="card"><div class="grid">';
+    var info=stageInfo(S.dept), cur=info.cur, hasQ=info.list.some(function(x){ return x.total>0; });
+    var canEsc=false;
+    if(hasQ){
+      h+='<div class="card"><div class="grp" style="margin:0 0 8px">おすすめの進め方</div>';
+      if(!info.started){
+        var dn=0; info.list.forEach(function(x){ dn+=Math.min(CFG.DIAG_PER,x.total); });
+        h+='<div class="note" style="margin-bottom:10px">最初に診断を受けると、自分に合った段階から始められます。</div>';
+        h+='<div class="grid"><button class="primary" id="diagBtn">診断を受ける（'+dn+'問）</button>'+
+           '<button class="ghost" id="noDiagBtn">診断を受けずに、段階①から始める</button></div>';
+      } else {
+        if(cur){
+          var tp=cur.today.n ? Math.round(cur.today.ok/cur.today.n*100) : 0;
+          h+='<div style="font-weight:700">今の段階：'+MARU[cur.no]+' '+esc(cur.name)+'</div>';
+          h+='<div class="note">'+esc(cur.goal)+'</div>';
+          h+='<div class="note" style="margin:6px 0 10px">合格日 '+cur.passDays+' / '+CFG.PASS_DAYS+
+             '　（今日：'+cur.today.n+'問'+(cur.today.n?'・'+tp+'%':'')+'　基準：1日'+cur.need+'問以上で'+CFG.PASS_PCT+'%以上）</div>';
+          canEsc=(cur.tryDays>=CFG.ESCAPE_AFTER_DAYS);
+        } else {
+          h+='<div style="font-weight:700;margin-bottom:10px">すべての段階を通過しました。全範囲から出題します。</div>';
+        }
+        h+='<button class="primary" id="menuBtn" style="width:100%">今日のメニューを始める（'+CFG.MENU_N+'問）</button>';
+        h+='<table style="margin-top:12px"><tr><th>段階</th><th>状態</th></tr>';
+        info.list.forEach(function(x){
+          var lab = x.status==="empty" ? '<span style="color:var(--sub)">準備中</span>' :
+                    x.status==="pass"  ? '<span style="color:#00872f;font-weight:700">通過</span>' :
+                    x.status==="diag"  ? '<span style="color:#00872f">診断で通過</span>' :
+                    x.status==="skip"  ? '<span style="color:#e65100">仮通過（基準は未達）</span>' :
+                    x.status==="now"   ? '<span style="color:var(--brand-d);font-weight:700">挑戦中（合格日 '+x.passDays+'/'+CFG.PASS_DAYS+'）</span>' :
+                                         '<span style="color:var(--sub)">これから</span>';
+          h+='<tr><td>'+MARU[x.no]+' '+esc(x.name)+'</td><td>'+lab+'</td></tr>';
+        });
+        h+='</table>';
+        if(canEsc) h+='<div class="note" style="margin-top:10px">この段階に'+cur.tryDays+'日挑戦しています。基準に届かなくても、先へ進めます。'+
+           '仮通過にした段階の問題は、今日のメニューに出続けます。基準に届いた時点で「通過」に変わります。</div>'+
+           '<button class="ghost" id="escBtn" style="width:100%;margin-top:6px">この段階を仮通過にして、次へ進む</button>';
+        h+='<button class="back" id="rediagBtn" style="margin-top:12px">診断をやり直す</button>';
+      }
+      h+='</div>';
+    }
+    h+='<div class="card"><div class="grp" style="margin:0 0 8px">自由に解く（種別から選ぶ）</div><div class="grid">';
     var lastType=null;
     ps.forEach(function(p){
       if(p.type!==lastType){ h+='<div class="grp">'+esc(p.type)+'</div>'; lastType=p.type; }
@@ -444,6 +627,14 @@ var STORE=(function(){
     if(wn) h+='<button class="ghost" id="revBtn" style="width:100%">間違えた問題を復習する（'+wn+'問'+(wn>REVIEW_MAX?'のうち'+REVIEW_MAX+'問':'')+'）</button>';
     app.innerHTML=h; wireBack(function(){ go("menu"); });
     if(wn) document.getElementById("revBtn").onclick=startReview;
+    function on(id,fn){ var b=document.getElementById(id); if(b) b.onclick=fn; }
+    on("diagBtn",startDiag); on("rediagBtn",startDiag); on("menuBtn",startMenu);
+    on("noDiagBtn",function(){ var pr=progGet(S.dept); pr.start=1; progSet(S.dept,pr); render(); });
+    on("escBtn",function(){
+      var b=document.getElementById("escBtn");
+      if(!b.getAttribute("data-sure")){ b.setAttribute("data-sure","1"); b.textContent="本当に仮通過にする（もう一度押す）"; return; }
+      var pr=progGet(S.dept); pr.skip=pr.skip||{}; pr.skip[cur.no]=ymd(new Date()); progSet(S.dept,pr); show();
+    });
     wireAll("[data-k]","data-k",openPart);
   }
 
@@ -487,8 +678,8 @@ var STORE=(function(){
     var c=curQuiz(), qs=c.qs, q=c.q, picked=c.picked, perm=c.perm;
     var p=partByKey(q._pk);
     var last=(S.qIndex>=qs.length-1);
-    var isRev=(S.mode==="review");
-    var crumb=isRev ? p.dept+" › 復習 › "+partName(p)+"・"+q.category : p.dept+" › "+partName(p)+" › "+S.catName;
+    var isRev=(S.mode!=="cat");
+    var crumb=isRev ? p.dept+" › "+MODE_LABEL[S.mode]+" › "+partName(p)+"・"+q.category : p.dept+" › "+partName(p)+" › "+S.catName;
     var homeLabel=isRev ? "種別選択" : "カテゴリー一覧";
     var h=bar(quizHome,homeLabel,crumb);
 
@@ -511,7 +702,7 @@ var STORE=(function(){
       h+='<div class="vsub">解答時間 '+(S.times[S.qIndex]!=null? S.times[S.qIndex]+'秒' : '—')+'</div>';
       h+='<div class="explain"><h4>解説</h4><div class="exp-body">'+rich(mapExp(q.explanation,perm))+'</div></div>';
       h+='<div class="nav">'+backBtn+'<span class="spacer"></span>'+
-         '<button class="primary" id="stepNext">'+(last?(isRev?"復習の結果へ":"カテゴリーの結果へ"):"次へ ›")+'</button></div>';
+         '<button class="primary" id="stepNext">'+(last?(isRev?"結果へ":"カテゴリーの結果へ"):"次へ ›")+'</button></div>';
       h+='</div>';
       app.innerHTML=h; wireBack(quizHome);
       document.getElementById("stepBack").onclick=stepBack;
@@ -555,6 +746,9 @@ var STORE=(function(){
     var correct=0, tsum=0, tn=0;
     qs.forEach(function(q,i){ if(S.answers[i]===q.answer) correct++; if(S.times[i]!=null){ tsum+=S.times[i]; tn++; } });
     var pct=Math.round(correct/qs.length*100);
+    if(S.mode==="diag"){ finishDiag(qs); return; }
+    if(S.mode==="menu"){ S.menuRes={ correct:correct, total:qs.length, avg:(tn?Math.round(tsum/tn):null),
+        wrong:qs.filter(function(q,i){ return S.answers[i]!==q.answer; }) }; go("menuresult"); return; }
     if(S.mode==="review"){ S.reviewRes={ correct:correct, total:qs.length }; go("reviewresult"); return; }
     S.results[S.catName]={ correct:correct, total:qs.length, avg:(tn?Math.round(tsum/tn):null) };
     histPush(S.partKey, S.catName, { p:pct, d:ymd(new Date()) });
@@ -597,6 +791,65 @@ var STORE=(function(){
     h+='<button class="ghost" id="toTypes">種別選択へ</button></div></div>';
     app.innerHTML=h; wireBack(function(){ go("types"); });
     if(rest) document.getElementById("again").onclick=startReview;
+    document.getElementById("toTypes").onclick=function(){ go("types"); };
+  }
+
+  /* 今日のメニューの結果 */
+  function renderMenuResult(){
+    var res=S.menuRes, info=stageInfo(S.dept), before=S.before||info;
+    var h=bar(function(){ go("types"); },"種別選択","今日のメニューの結果");
+    h+='<div class="card center"><div class="note">今日のメニューの正答率</div>';
+    h+='<div class="pct">'+Math.round(res.correct/res.total*100)+'%</div>';
+    h+='<div class="note">'+res.correct+' / '+res.total+' 問正解'+(res.avg!=null?'　平均解答時間 '+res.avg+'秒':'')+'</div></div>';
+    h+='<div class="card">';
+    var b=before.cur, a=b ? info.list[b.no-1] : null;
+    if(a){
+      var tp=a.today.n ? Math.round(a.today.ok/a.today.n*100) : 0;
+      h+='<div style="font-weight:700">段階'+MARU[a.no]+' '+esc(a.name)+'</div>';
+      h+='<div class="note" style="margin:4px 0 8px">今日：'+a.today.n+'問・'+tp+'%（その日の最初の解答で数えます）</div>';
+      if(a.status==="pass" && b.status!=="pass"){
+        h+='<div class="verdict ok">この段階を通過しました。'+(info.cur?'次は 段階'+MARU[info.cur.no]+' '+esc(info.cur.name)+' です。':'')+'</div>';
+      } else if(a.today.n<a.need){
+        h+='<div class="note">今日の判定には、この段階の問題があと'+(a.need-a.today.n)+'問必要です。もう1セット解くと届きます。</div>';
+      } else if(tp>=CFG.PASS_PCT){
+        h+='<div class="verdict ok">今日は合格日です（合格日 '+a.passDays+' / '+CFG.PASS_DAYS+'）。'+
+           (a.passDays<CFG.PASS_DAYS?'別の日にもう一度届けば、通過です。':'')+'</div>';
+      } else {
+        h+='<div class="note">今日は基準（'+CFG.PASS_PCT+'%）に届いていません。まだ解いていない問題に正解すれば、今日の成績は上がります。同じ問題の解き直しは数えません。</div>';
+      }
+    }
+    var pc={}; res.wrong.forEach(function(q){ var k=pointOf(q)||"（論点なし）"; pc[k]=(pc[k]||0)+1; });
+    var ks=Object.keys(pc).sort(function(x,y){ return pc[y]-pc[x]; });
+    if(ks.length){
+      h+='<div class="grp" style="margin:12px 0 6px">今回、間違えた論点</div><table>';
+      ks.forEach(function(k){ h+='<tr><td>'+esc(k)+'</td><td class="num-c">'+pc[k]+'問</td></tr>'; });
+      h+='</table><div class="note" style="margin-top:6px">次のメニューで、この論点を多めに出します。</div>';
+    }
+    h+='<div class="nav" style="margin-top:14px;justify-content:center">'+
+       '<button class="primary" id="again">もう1セット解く ›</button><button class="ghost" id="toTypes">段階の一覧へ</button></div></div>';
+    app.innerHTML=h; wireBack(function(){ go("types"); });
+    document.getElementById("again").onclick=startMenu;
+    document.getElementById("toTypes").onclick=function(){ go("types"); };
+  }
+  /* 診断の結果 */
+  function renderDiagResult(){
+    var d=S.diagRes, info=stageInfo(S.dept);
+    var h=bar(function(){ go("types"); },"種別選択","診断の結果");
+    h+='<div class="card"><table><tr><th>段階</th><th class="num-c">正解</th><th>判定</th></tr>';
+    STAGES.forEach(function(sg){
+      var x=d.r[sg.no];
+      if(!x){ h+='<tr><td>'+MARU[sg.no]+' '+esc(sg.name)+'</td><td class="num-c">—</td><td style="color:var(--sub)">準備中</td></tr>'; return; }
+      var ok = sg.no<d.start;
+      h+='<tr><td>'+MARU[sg.no]+' '+esc(sg.name)+'</td><td class="num-c">'+x.ok+' / '+x.n+'</td><td>'+
+         (ok?'<span style="color:#00872f">通過</span>':(sg.no===d.start?'<strong>ここから始める</strong>':'<span style="color:var(--sub)">これから</span>'))+'</td></tr>';
+    });
+    h+='</table>';
+    h+='<div style="font-weight:700;margin-top:12px">'+(info.cur?'段階'+MARU[info.cur.no]+' '+esc(info.cur.name)+' から始めます。':'すべての段階が基準に届いています。全範囲から出題します。')+'</div>';
+    h+='<div class="note" style="margin-top:4px">各段階の最初に届かなかったところから始めます。後ろの段階で正解していても、前の段階から順に固めます。</div>';
+    h+='<div class="nav" style="margin-top:14px;justify-content:center">'+
+       '<button class="primary" id="goMenu">今日のメニューを始める ›</button><button class="ghost" id="toTypes">段階の一覧へ</button></div></div>';
+    app.innerHTML=h; wireBack(function(){ go("types"); });
+    document.getElementById("goMenu").onclick=startMenu;
     document.getElementById("toTypes").onclick=function(){ go("types"); };
   }
 
@@ -672,15 +925,33 @@ var STORE=(function(){
       });
       h+='</table><div class="note" style="margin-top:8px">各問題の最新の解答で集計しています。</div></div>';
     }
+    depts().forEach(function(d){
+      var inf=stageInfo(d); if(!inf.started) return;
+      h+='<div class="card"><div class="grp" style="margin:0 0 8px">段階の状況（'+esc(d)+'）</div>';
+      h+='<table><tr><th>段階</th><th>状態</th><th class="num-c">合格日</th><th class="num-c">挑戦日</th></tr>';
+      inf.list.forEach(function(x){
+        var lab={ empty:"準備中", pass:"通過", diag:"診断で通過", skip:"仮通過", now:"挑戦中", todo:"これから" }[x.status];
+        h+='<tr><td>'+MARU[x.no]+' '+esc(x.name)+'</td><td>'+lab+'</td><td class="num-c">'+x.passDays+'</td><td class="num-c">'+x.tryDays+'</td></tr>';
+      });
+      h+='</table></div>';
+    });
     if(logs.length) h+='<button class="ghost" id="csvBtn" style="width:100%">記録をCSVで保存する（指導者に送る用）</button>';
     app.innerHTML=h; wireBack(function(){ go("menu"); });
     if(logs.length) document.getElementById("csvBtn").onclick=exportCsv;
   }
   function exportCsv(){
-    var rows=[["日時","ID","シート","カテゴリー","論点","選んだ選択肢（元の番号）","正誤","解答秒"]];
+    var rows=[["日時","ID","シート","カテゴリー","論点","選んだ選択肢（元の番号）","正誤","解答秒","段階","出題"]];
     logAll().forEach(function(e){
       var q=QMAP[e.id];
-      rows.push([e.t, e.id, e.k||"", e.c||"", q?pointOf(q):"", e.a, e.o?"○":"×", e.s]);
+      rows.push([e.t, e.id, e.k||"", e.c||"", q?pointOf(q):"", e.a, e.o?"○":"×", e.s, q?(stageOf(q)||""):"", MODE_LABEL[e.m]||""]);
+    });
+    // 段階の状況（指導者が、どこで止まっているかを見る用）
+    depts().forEach(function(d){
+      var inf=stageInfo(d); if(!inf.started) return;
+      inf.list.forEach(function(x){
+        var lab={ empty:"準備中", pass:"通過", diag:"診断で通過", skip:"仮通過", now:"挑戦中", todo:"これから" }[x.status];
+        rows.push(["#段階の状況", d, MARU[x.no]+" "+x.name, lab, "合格日 "+x.passDays, "挑戦日 "+x.tryDays, "", "", x.no, ""]);
+      });
     });
     var csv=rows.map(function(r){
       return r.map(function(v){ return '"'+String(v==null?"":v).replace(/"/g,'""')+'"'; }).join(",");
