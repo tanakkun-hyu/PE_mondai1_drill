@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "ND_1",
   "part_label": "農業 説明文の論理 1",
-  "sheet": "農業_説明文の論理_1",
+  "sheet": "N09",
   "dept": "農業",
   "type": "説明文の論理",
   "sheet_no": 1,
-  "generated_at": "2026-11-11T14:49:12+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "ND001",

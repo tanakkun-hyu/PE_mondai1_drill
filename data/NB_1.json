@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "NB_1",
   "part_label": "農業 観点と課題 1",
-  "sheet": "農業_観点と課題_1",
+  "sheet": "N04",
   "dept": "農業",
   "type": "観点と課題",
   "sheet_no": 1,
-  "generated_at": "2026-11-11T14:49:12+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "NB001",

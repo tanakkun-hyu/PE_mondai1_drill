@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "NH_1",
   "part_label": "農業 リスクと対策 1",
-  "sheet": "農業_リスクと対策_1",
+  "sheet": "N12",
   "dept": "農業",
   "type": "リスクと対策",
   "sheet_no": 1,
-  "generated_at": "2026-11-12T10:26:19+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "NH001",

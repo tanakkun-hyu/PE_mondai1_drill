@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "NF_1",
   "part_label": "農業 論理の基礎 1",
-  "sheet": "農業_論理の基礎_1",
+  "sheet": "N01",
   "dept": "農業",
   "type": "論理の基礎",
   "sheet_no": 1,
-  "generated_at": "2026-11-11T14:49:12+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "NF001",

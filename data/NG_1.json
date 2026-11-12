@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "NG_1",
   "part_label": "農業 条件の読み替え 1",
-  "sheet": "農業_条件の読み替え_1",
+  "sheet": "N16",
   "dept": "農業",
   "type": "条件の読み替え",
   "sheet_no": 1,
-  "generated_at": "2026-11-12T10:13:56+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "NG001",

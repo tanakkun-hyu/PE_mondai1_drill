@@ -3,11 +3,11 @@
   "exam": "技術士 問題Ⅰドリル",
   "part_key": "KG_2",
   "part_label": "建設 条件の読み替え 2",
-  "sheet": "建設_条件の読み替え_2",
+  "sheet": "K17",
   "dept": "建設",
   "type": "条件の読み替え",
   "sheet_no": 2,
-  "generated_at": "2026-11-12T10:13:56+09:00",
+  "generated_at": "2026-11-12T17:05:20+09:00",
   "questions": [
     {
       "id": "KG013",
