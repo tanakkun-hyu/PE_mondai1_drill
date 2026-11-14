@@ -9,6 +9,8 @@
 <!--
   技術士 問題Ⅰドリル（四択）
   RCCM択一 配布版（rccm-takuitsu-web 2026-09-03）の形式を流用して新しく作ったもの。RCCM側のファイルとは別物。
+  v4.1（2026-11-14）：名前とパスワードのログイン（照合はGoogleスプレッドシート「メンバー」シートのGAS「DrillLogin.gs」）／
+                    透かしと記録のCSVに利用者名
   v4（2026-11-11）：段階（6段階）／診断／今日のメニュー（弱い論点・間違えた問題・新しい問題を自動で混ぜる）／
                     段階の合格判定（別の日に2回、80%以上）／仮通過／タブのアイコン
   v2（2026-11-10）：選択肢の並べ替え（解説の番号も連動）／セット単位の出題順／論点別の集計／
@@ -178,13 +180,17 @@ var STORE=(function(){
   var LICENSE = {
     name: "社内限定",   // 透かし表示
     accessCode: "",     // コード無し
-    expiry: ""          // 期限無し（"YYYY-MM-DD" を入れるとその翌日からロック）
+    expiry: "",         // 期限無し（"YYYY-MM-DD" を入れるとその翌日からロック）
+    /* ログインの照合窓口（DrillLogin.gs をウェブアプリとしてデプロイしたURL）。
+       空にすると、ログインなしで使える（以前と同じ）。 */
+    loginUrl: "https://script.google.com/macros/s/AKfycbysWC48-0dhSVwZcOkYEzjMBQly7BhSLjDFF4XZVxgDInjve78NpYDrSyqkDd8uufxZ/exec"
   };
   /* ============================================================================= */
 
   var BASE_CANDIDATES = ["", "../"];
   var DATA = { exam:"技術士 問題Ⅰドリル", parts:[] };
   var unlocked = false;
+  var ME = "";            // ログイン中の名前（v4.1）
 
   var S = { screen:"boot", dept:null, partKey:null, catName:null,
             qIndex:0, view:"question", answers:{}, times:{}, timer:null, results:{},
@@ -511,9 +517,11 @@ var STORE=(function(){
     document.getElementById("hNav").hidden = (S.screen!=="quiz");
     if(S.screen==="locked"){ return renderLocked(); }
     if(S.screen==="codegate"){ return renderCodeGate(); }
+    if(S.screen==="login"){ return renderLogin(); }
     renderWatermark();
     var lic=[];
-    if(LICENSE.name) lic.push("利用者: "+esc(LICENSE.name));
+    if(ME) lic.push("利用者: "+esc(ME)+(LICENSE.name?"（"+esc(LICENSE.name)+"）":""));
+    else if(LICENSE.name) lic.push("利用者: "+esc(LICENSE.name));
     if(LICENSE.expiry) lic.push("有効期限: "+esc(LICENSE.expiry));
     lic.push("この教材の無断複製・再配布を禁じます。");
     document.getElementById("licBar").innerHTML = lic.join("　/　");
@@ -557,7 +565,10 @@ var STORE=(function(){
        '<span class="stat">選択肢を隠して出題します。自分の答えを決めてから選択肢を見ます。</span></span>'+
        '<span class="sw">'+(on?'ON':'OFF')+'</span></button>';
     h+='<button class="ghost" id="toRec" style="width:100%">学習記録を見る</button>';
+    if(ME) h+='<div class="note" style="text-align:center;margin-top:14px">'+esc(ME)+' でログイン中　'+
+              '<button class="ghost" id="logoutBtn" style="width:auto;padding:4px 12px;margin-left:6px">ログアウト</button></div>';
     app.innerHTML=h;
+    if(ME) document.getElementById("logoutBtn").onclick=logout;
     document.getElementById("thinkTg").onclick=function(){ STORE.set("think",!thinkOn()); render(); };
     wireAll("[data-dept]","data-dept",openDept);
     document.getElementById("toRec").onclick=function(){ go("records"); };
@@ -953,6 +964,7 @@ var STORE=(function(){
         rows.push(["#段階の状況", d, MARU[x.no]+" "+x.name, lab, "合格日 "+x.passDays, "挑戦日 "+x.tryDays, "", "", x.no, ""]);
       });
     });
+    if(ME) rows.push(["#利用者", ME, "", "", "", "", "", "", "", ""]);
     var csv=rows.map(function(r){
       return r.map(function(v){ return '"'+String(v==null?"":v).replace(/"/g,'""')+'"'; }).join(",");
     }).join("\r\n");
@@ -967,7 +979,7 @@ var STORE=(function(){
   function renderWatermark(){
     var wm=document.getElementById("wm");
     if(wm.dataset.done) return;
-    var name=LICENSE.name||"";
+    var name=[LICENSE.name||"", ME].filter(Boolean).join("　");
     if(!name){ return; }
     var h="";
     for(var y=-100;y<1400;y+=140){ for(var x=-100;x<1400;x+=360){
@@ -988,13 +1000,79 @@ var STORE=(function(){
       '<button class="primary" id="enter" style="width:100%">開始する</button></div>';
     var inp=document.getElementById("code");
     function submit(){
-      if(inp.value===LICENSE.accessCode){ unlocked=true; go("menu"); }
+      if(inp.value===LICENSE.accessCode){ unlocked=true; loginGate(); }
       else document.getElementById("cerr").textContent="コードが違います。";
     }
     document.getElementById("enter").onclick=submit;
     inp.addEventListener("keydown",function(e){ if(e.key==="Enter") submit(); });
     inp.focus();
   }
+  /* ---------- ログイン（v4.1） ----------
+     名前とパスワードは DrillLogin.gs（Googleスプレッドシート「メンバー」シート）で照合する。
+     端末には名前と合札（token）だけを残し、パスワードは残さない。
+     開くたびに合札を確かめるので、メンバー表で × にした人やパスワードを変えた人は、次に開いたときに入れなくなる。 */
+  function callLogin(body){
+    var ctl = window.AbortController ? new AbortController() : null;
+    var tm = setTimeout(function(){ if(ctl) ctl.abort(); }, 20000);
+    // 本文を文字として送る（Apps Script との通信で余計な事前確認を起こさないため）
+    return fetch(LICENSE.loginUrl, { method:"POST", body:JSON.stringify(body), signal: ctl?ctl.signal:undefined })
+      .then(function(r){ clearTimeout(tm); if(!r.ok) throw new Error("http"); return r.json(); })
+      .catch(function(e){ clearTimeout(tm); throw e; });
+  }
+  var loginMsg = "";
+  function renderLogin(){
+    document.getElementById("licBar").innerHTML="";
+    var auth=STORE.get("auth",null);
+    app.innerHTML='<div class="card"><h3 style="margin-top:0">ログイン</h3>'+
+      '<div class="note" style="margin-bottom:10px">指導者から受け取った名前とパスワードを入れてください。この端末では、次からは入力しなくても開きます。</div>'+
+      '<input type="text" id="lgName" placeholder="名前" autocomplete="username" style="margin-bottom:8px" value="'+esc(auth&&auth.name||"")+'">'+
+      '<input type="password" id="lgPass" placeholder="パスワード" autocomplete="current-password">'+
+      '<div id="lgErr" class="note" style="color:var(--ng);min-height:18px;margin-top:6px">'+esc(loginMsg)+'</div>'+
+      '<button class="primary" id="lgBtn" style="width:100%">ログイン</button></div>';
+    var nm=document.getElementById("lgName"), pw=document.getElementById("lgPass"),
+        btn=document.getElementById("lgBtn"), err=document.getElementById("lgErr");
+    function submit(){
+      var name=nm.value.trim(), pass=pw.value;
+      if(!name||!pass){ err.textContent="名前とパスワードを入れてください。"; return; }
+      btn.disabled=true; btn.textContent="確認しています…"; err.textContent="";
+      callLogin({action:"login", name:name, pass:pass}).then(function(res){
+        if(res && res.ok){
+          STORE.set("auth",{name:res.name, token:res.token});
+          ME=res.name; loginMsg=""; go("menu");
+        } else {
+          err.textContent=(res&&res.msg)||"ログインできませんでした。";
+          btn.disabled=false; btn.textContent="ログイン"; pw.value=""; pw.focus();
+        }
+      }).catch(function(){
+        err.textContent="通信できませんでした。電波の状態を確かめて、もう一度押してください。";
+        btn.disabled=false; btn.textContent="ログイン";
+      });
+    }
+    btn.onclick=submit;
+    [nm,pw].forEach(function(el){ el.addEventListener("keydown",function(e){ if(e.key==="Enter") submit(); }); });
+    (nm.value?pw:nm).focus();
+  }
+  function logout(){
+    var a=STORE.get("auth",null);
+    STORE.set("auth", a ? {name:a.name} : null);   // 名前だけ残し、次の入力を楽にする
+    ME=""; loginMsg="ログアウトしました。学習記録はこの端末に残っています。";
+    var wm=document.getElementById("wm"); wm.innerHTML=""; delete wm.dataset.done;
+    go("login");
+  }
+  function loginGate(){
+    if(!LICENSE.loginUrl){ go("menu"); return; }
+    var auth=STORE.get("auth",null);
+    if(!auth || !auth.token){ go("login"); return; }
+    app.innerHTML='<div class="card note">ログインを確かめています…</div>';
+    callLogin({action:"check", name:auth.name, token:auth.token}).then(function(res){
+      if(res && res.ok){ ME=res.name; go("menu"); }
+      else { STORE.set("auth",{name:auth.name}); loginMsg=(res&&res.msg)||"ログインし直してください。"; go("login"); }
+    }).catch(function(){
+      // 照合の窓口に届かないときは、前回ログインした人をそのまま通す（電波が弱いときに締め出さないため）
+      ME=auth.name; go("menu");
+    });
+  }
+
   function gate(){
     if(LICENSE.expiry){
       var today=new Date(); today.setHours(0,0,0,0);
@@ -1002,7 +1080,7 @@ var STORE=(function(){
       if(!isNaN(exp.getTime()) && today>exp){ go("locked"); return; }
     }
     if(LICENSE.accessCode && !unlocked){ go("codegate"); return; }
-    go("menu");
+    loginGate();
   }
 
   /* ---------- 起動 ---------- */
